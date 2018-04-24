@@ -1,16 +1,20 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
 #include <time.h>
 #include <string.h>
+
+#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
+
 #if defined(__APPLE__) || defined(__MACOSX)
 #include <OpenCL/cl.h>
 #else
 #include <CL/opencl.h>
 #endif
+
 #include "../../common/inc/AOCL_Utils.h"
 
+#include "sofm.h"
+
 using namespace aocl_utils;
+
 
 
 // OpenCL runtime configuration
@@ -46,7 +50,7 @@ void run();
 void cleanup();
 
 
-#define NUM_SHORTS 1000
+#define NUM_SHORTS 10000000
 
 
 // Entry point.
@@ -105,7 +109,7 @@ bool init_opencl() {
 	// }
 
 	// Get the OpenCL platform.
-	platform = findPlatform("Apple");
+	platform = findPlatform("NVIDIA CUDA");
 	if(platform == NULL) {
 		printf("ERROR: Unable to find Altera OpenCL platform.\n");
 		return false;
@@ -209,9 +213,9 @@ void run() {
 	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &output_buf);
 	checkError(status, "Failed to set argument %d", argi - 1);
 
-	unsigned short vv = N;
+	int vv = N;
 
-	status = clSetKernelArg(kernel, argi++, sizeof(unsigned short), &vv);
+	status = clSetKernelArg(kernel, argi++, sizeof(int), &vv);
 	checkError(status, "Failed to set argument %d", argi - 1);
   
 
@@ -225,7 +229,7 @@ void run() {
 	//
 	// Events are used to ensure that the kernel is not launched until
 	// the writes to the input buffers have completed.
-	const size_t localSize = 128;
+	const size_t localSize = 256;
 	//const size_t global_work_size = N;
 	const size_t global_work_size = ceil(N/(float)localSize)*localSize;
 	//printf("Launching for device %d (%d elements)\n", 0, global_work_size);
@@ -234,7 +238,7 @@ void run() {
 	double start_time = getCurrentTimestamp();
 
 	status = clEnqueueNDRangeKernel(queue, kernel, 1, NULL,
-		  &global_work_size, NULL, 1, &write_event, &kernel_event);
+		  &global_work_size, &localSize, 1, &write_event, &kernel_event);
 	checkError(status, "Failed to launch kernel");
 
 	clFinish(queue);
