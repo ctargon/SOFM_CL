@@ -16,29 +16,20 @@
 #    <tab> last command
 #    <blank line>   -- the list of commands must end with a blank line
 
-sofm_cl : main_cl.o AOCL_Utils.o sofm.o
-	g++ -Wall -g main_cl.o AOCL_Utils.o sofm.o -o sofm_cl -lOpenCL #-framework OpenCL
+sofm_cl : main_cl.o sofm.o AOCL_Utils.o 
+	g++ -Wall -g main_cl.o sofm.o AOCL_Utils.o -o sofm_cl -lm -lOpenCL #-framework OpenCL
 
 sofm_serial : main_serial.o sofm.o
-	gcc -Wall -g main_serial.o sofm.o -o sofm_serial -lm
+	g++ -Wall -g main_serial.o sofm.o -o sofm_serial -lm
 
-main_cl.o : ./host/src/main.cpp ./common/inc/AOCL_Utils.h ./host/src/sofm.h
+main_cl.o : ./host/src/main.cpp ./host/src/sofm.h ./common/inc/AOCL_Utils.h 
 	g++ -Wall -g -c ./host/src/main.cpp -o main_cl.o
 
 main_serial.o : ./serial/main.c ./host/src/sofm.h
-	gcc -Wall -g -c ./serial/main.c -o main_serial.o
+	g++ -Wall -g -c ./serial/main.c -o main_serial.o
 
 sofm.o : ./host/src/sofm.c
-	gcc -Wall -g -c ./host/src/sofm.c
-
-# hpot_support.o : hpot_support.c datatypes.h list.h hpot_support.h
-# 	gcc -Wall -g -c hpot_support.c
-
-# lab2.o : lab2.c datatypes.h list.h hpot_support.h
-# 	gcc -Wall -g -c lab2.c
-
-# testlist : testlist.o list.o hpot_support.o
-# 	gcc -Wall -g list.o hpot_support.o testlist.o -o testlist
+	g++ -Wall -g -c ./host/src/sofm.c -lm
 
 AOCL_Utils.o : ./common/src/AOCL_Utils.cpp
 	g++ -Wall -g -c ./common/src/AOCL_Utils.cpp

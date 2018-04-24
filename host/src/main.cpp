@@ -25,18 +25,41 @@ cl_context context = NULL;
 cl_command_queue queue; 
 cl_program program = NULL;
 cl_kernel kernel; 
+
 cl_mem output_buf; 
 cl_mem input_a_buf;
 cl_mem input_b_buf;
 
+cl_mem weights_buf;
+cl_mem dataset_buf;
 
-// Problem data.
+// // Problem data
 int N; // problem size
 unsigned short *output;
 bool test;
 unsigned short *inputs_a;
 unsigned short *inputs_b;
 unsigned short *c_output;
+
+// global problem parameters
+int dim_x;
+int dim_y;
+int n_features;
+
+int iters;
+float init_lr;
+float lr;
+
+float max_dim;
+float init_radius;
+float radius;
+float time_delay;
+
+// global data pointers and params
+float **color_data;
+float **weights;
+int num_data_examples;
+
 
 // openCL kernel
 char *kernelBuf = NULL;
@@ -57,14 +80,26 @@ void cleanup();
 int main(int argc, char **argv) {
 	test = false;
 
+	if (argc != 4)
+	{
+		printf("Expecting: ./sofm_cl ./path/to/kernel dim_x dim_y\n");
+		return -1;
+	}
+
+	dim_x = atoi(argv[2]);
+	dim_y = atoi(argv[3]);
+
 	// read kernel file
 	read_kernel_file(argv[1]);
 
 	// Initialize the problem data.
 	init_problem();
 
+	return 0;
+
 	// Initialize OpenCL.
-	if(!init_opencl()) {
+	if(!init_opencl()) 
+	{
 		printf("Initializing OpenCL failed.\n");
 		return -1;
 	}
@@ -84,16 +119,52 @@ int main(int argc, char **argv) {
 
 void read_kernel_file(char *file)
 {
-  FILE *fptr = fopen(file, "r");
-  fseek(fptr, 0, SEEK_END);
-  int kernelSize = ftell(fptr);
-  rewind(fptr);
+	FILE *fptr = fopen(file, "r");
+	fseek(fptr, 0, SEEK_END);
+	int kernelSize = ftell(fptr);
+	rewind(fptr);
 
-  kernelBuf = (char *) malloc (sizeof(char) * kernelSize + 1);
-  kernelBuf[kernelSize] = '\0';
-  fread(kernelBuf, sizeof(char), kernelSize, fptr);
-  fclose(fptr);
+	kernelBuf = (char *) malloc (sizeof(char) * kernelSize + 1);
+	kernelBuf[kernelSize] = '\0';
+	fread(kernelBuf, sizeof(char), kernelSize, fptr);
+	fclose(fptr);
 }
+
+
+
+//Initialize data for the problem.
+void init_problem() {
+
+	//int i;
+	n_features = COLOR_D;
+	iters = 5000;
+	init_lr = lr = 0.1;
+
+	max_dim = max(dim_x, dim_y);
+	init_radius = radius = (float) max_dim / 2.0;
+
+	time_delay = (float) iters / log(init_radius);
+
+	num_data_examples = 200;
+	color_data = load_rand_colors(num_data_examples);
+
+	weights = initialize_weights(dim_x, dim_y, n_features);
+
+
+	// output = (unsigned short*) malloc(sizeof(unsigned short) * N);
+	// inputs_a = (unsigned short*) malloc(sizeof(unsigned short) * N);  
+	// inputs_b = (unsigned short*) malloc(sizeof(unsigned short) * N);
+	// c_output = (unsigned short*) malloc(sizeof(unsigned short) * N);
+
+	// for(i = 0; i < N; i++)
+	// {
+	// 	inputs_a[i] = rand() % 1000;
+	// 	inputs_b[i] = rand() % 1000;
+	// }
+  
+}
+
+
 
 
 // Initializes the OpenCL objects.
@@ -110,7 +181,8 @@ bool init_opencl() {
 
 	// Get the OpenCL platform.
 	platform = findPlatform("NVIDIA CUDA");
-	if(platform == NULL) {
+	if(platform == NULL) 
+	{
 		printf("ERROR: Unable to find Altera OpenCL platform.\n");
 		return false;
 	}
@@ -146,47 +218,37 @@ bool init_opencl() {
 	kernel = clCreateKernel(program, kernel_name, &status);
 	checkError(status, "Failed to create kernel");
 
-	//Input buffer.
-	input_a_buf = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-			sizeof(unsigned short) * N, NULL, &status);
-	checkError(status, "Failed to create buffer for input");
+	// //Input buffer.
+	// input_a_buf = clCreateBuffer(context, CL_MEM_READ_ONLY, 
+	// 		sizeof(unsigned short) * N, NULL, &status);
+	// checkError(status, "Failed to create buffer for input");
 
-	input_b_buf = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-			sizeof(unsigned short) * N, NULL, &status);
-	checkError(status, "Failed to create buffer for input");
+	// input_b_buf = clCreateBuffer(context, CL_MEM_READ_ONLY, 
+	// 		sizeof(unsigned short) * N, NULL, &status);
+	// checkError(status, "Failed to create buffer for input");
 
-	// Output buffer.
-	output_buf = clCreateBuffer(context, CL_MEM_WRITE_ONLY, 
-				sizeof(unsigned short) * N, NULL, &status);
-	checkError(status, "Failed to create buffer for output");
+	// // Output buffer.
+	// output_buf = clCreateBuffer(context, CL_MEM_WRITE_ONLY, 
+	// 			sizeof(unsigned short) * N, NULL, &status);
+	// checkError(status, "Failed to create buffer for output");
+
+	weights_buf = clCreateBuffer(context, CL_MEM_READ_WRITE,
+			sizeof(float) * dim_x * dim_y * n_features,
+			NULL, &status);
+	checkError(status, "Failed to create buffer for weights");
+
+	dataset_buf = clCreateBuffer(context, CL_MEM_READ_ONLY,
+			sizeof(float) * n_features * num_data_examples,
+			NULL, &status);
+	checkError(status, "Failed to create buffer for dataset");
 
 	return true;
 }
 
 
 
-//Initialize data for the problem.
-void init_problem() {
-
-	int i;
-	N = NUM_SHORTS;
-
-	output = (unsigned short*) malloc(sizeof(unsigned short) * N);
-	inputs_a = (unsigned short*) malloc(sizeof(unsigned short) * N);  
-	inputs_b = (unsigned short*) malloc(sizeof(unsigned short) * N);
-	c_output = (unsigned short*) malloc(sizeof(unsigned short) * N);
-  
-	for(i = 0; i < N; i++)
-	{
-		inputs_a[i] = rand() % 1000;
-		inputs_b[i] = rand() % 1000;
-	}
-  
-}
-
-
-
-void run() {
+void run() 
+{
 	int i, num_errors;
 	cl_int status;
 
@@ -195,12 +257,14 @@ void run() {
 	cl_event finish_event;
 	cl_event write_event;
 
-	status = clEnqueueWriteBuffer(queue, input_a_buf, CL_FALSE,
-				0, sizeof(unsigned short) * N, inputs_a, 0, NULL, &write_event);
+	status = clEnqueueWriteBuffer(queue, weights_buf, CL_FALSE,
+				0, sizeof(float) * dim_x * dim_y * n_features, 
+				weights, 0, NULL, &write_event);
 	checkError(status, "Failed to write input buffer");
 
-	status = clEnqueueWriteBuffer(queue, input_b_buf, CL_FALSE,
-				0, sizeof(unsigned short) * N, inputs_b, 0, NULL, &write_event);
+	status = clEnqueueWriteBuffer(queue, dataset_buf, CL_FALSE,
+				0, sizeof(float) * num_data_examples * n_features, 
+				dataset, 0, NULL, &write_event);
 	checkError(status, "Failed to write input buffer");
 
 
@@ -309,7 +373,8 @@ void run() {
 
 
 // Free the resources allocated during initialization
-void cleanup() {
+void cleanup() 
+{
 	if(kernel) {
 		clReleaseKernel(kernel);
 	}

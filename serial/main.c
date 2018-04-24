@@ -54,7 +54,7 @@ int main (int argc, char **argv)
 	// initialize network weights
 	float **net_weights = initialize_weights(net_dim_x, net_dim_y, num_features);
 	print_weights_debug(net_weights, net_dim_x, net_dim_y, num_features);
-	save_weights("../weights/init_sofm_weights.dat", net_weights, net_dim_x, net_dim_y, num_features);
+	save_weights((char *)"../weights/init_sofm_weights.dat", net_weights, net_dim_x, net_dim_y, num_features);
 
 	// begin training process
 
@@ -91,7 +91,7 @@ int main (int argc, char **argv)
 		}
 	}
 
-	save_weights("../weights/final_sofm_weights.dat", net_weights, net_dim_x, net_dim_y, num_features);
+	save_weights((char *)"../weights/final_sofm_weights.dat", net_weights, net_dim_x, net_dim_y, num_features);
 
 	// free memory
 	for (i = 0; i < net_dim_x; i++)
