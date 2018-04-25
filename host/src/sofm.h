@@ -22,13 +22,13 @@ struct coords
 
 
 // data/weight related functions
-float **initialize_weights(int dim_x, int dim_y, int n_features);
-void save_weights(char *fname, float **w, int x, int y, int n);
-void print_weights_debug(float **w, int x, int y, int n);
-float **load_rand_colors(int size);
+float *initialize_weights(int dim_x, int dim_y, int n_features);
+void save_weights(char *fname, float *w, int x, int y, int n);
+void print_weights_debug(float *w, int x, int y, int n);
+float *load_rand_colors(int size);
 
 // sofm related functions
-struct coords find_bmu(float **weights, float *x, int dim_x, int dim_y, int n_features);
+struct coords find_bmu(float *weights, float *x, int dim_x, int dim_y, int n_features);
 float decay_radius(float init_r, int iter, float time_delay);
 float decay_lr(float init_lr, int iter, int total_iters);
 float calc_dist_from_bmu(int i, int j, struct coords c);

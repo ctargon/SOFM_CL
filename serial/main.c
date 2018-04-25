@@ -34,14 +34,14 @@ int main (int argc, char **argv)
 
 	// load data
 	int size = 200;
-	float **color_data = load_rand_colors(size);
+	float *color_data = load_rand_colors(size);
 
 	// define network dimensions
-	int net_dim_x = 160;
-	int net_dim_y = 160;
+	int net_dim_x = 50;
+	int net_dim_y = 50;
 
 	// define hyperparameters
-	int iters = 5000;
+	int iters = 10000;
 	float init_lr = 0.1;
 	float lr = 0.1;
 	int max_dim = max(net_dim_x, net_dim_y);
@@ -52,18 +52,21 @@ int main (int argc, char **argv)
 
 
 	// initialize network weights
-	float **net_weights = initialize_weights(net_dim_x, net_dim_y, num_features);
-	print_weights_debug(net_weights, net_dim_x, net_dim_y, num_features);
-	save_weights((char *)"../weights/init_sofm_weights.dat", net_weights, net_dim_x, net_dim_y, num_features);
+	float *net_weights = initialize_weights(net_dim_x, net_dim_y, num_features);
+	//print_weights_debug(net_weights, net_dim_x, net_dim_y, num_features);
+	save_weights((char *)"./weights/init_sofm_weights.dat", net_weights, net_dim_x, net_dim_y, num_features);
 
 	// begin training process
+	printf("beginning training...\n");
 
 	for (i = 0; i < iters; i++)
 	{
-		printf("iter %d\n", i);
+		if (i % 100 == 0)
+			printf("iter %d\n", i);
+		
 		// get training example
 		idx = rand() % size;
-		x = color_data[idx];
+		x = &(color_data[idx * COLOR_D]);
 
 		// find best matching unit
 		bmu_idx = find_bmu(net_weights, x, net_dim_x, net_dim_y, num_features);
@@ -78,7 +81,7 @@ int main (int argc, char **argv)
 		{
 			for (j = 0; j < net_dim_y; j++)
 			{
-				w = net_weights[(ii * net_dim_x) + j];
+				w = &(net_weights[ii * net_dim_x * num_features + j * num_features]);
 				bmu_dist = calc_dist_from_bmu(ii, j, bmu_idx);
 
 				// update weight if within range
@@ -91,21 +94,11 @@ int main (int argc, char **argv)
 		}
 	}
 
-	save_weights((char *)"../weights/final_sofm_weights.dat", net_weights, net_dim_x, net_dim_y, num_features);
+	save_weights((char *)"./weights/final_sofm_weights.dat", net_weights, net_dim_x, net_dim_y, num_features);
 
-	// free memory
-	for (i = 0; i < net_dim_x; i++)
-	{
-		free(net_weights[i]);
-	}
 	free(net_weights);
 
-	for (i = 0; i < size; i++)
-	{
-		free(color_data[i]);
-	}
 	free(color_data);
-
 
 	return 0;
 }

@@ -8,21 +8,19 @@
 
 
 
-float **initialize_weights(int dim_x, int dim_y, int n_features)
+float *initialize_weights(int dim_x, int dim_y, int n_features)
 {
-	float **weights = (float **) malloc (dim_x * dim_y * sizeof(float *));
-	int i, j;
+	float *weights = (float *) malloc (dim_x * dim_y * n_features * sizeof(float));
+	int i, j, k;
 
-	for (i = 0; i < dim_x * dim_y; i++)
+	for (i = 0; i < dim_x; i++)
 	{
-		weights[i] = (float *) malloc (n_features * sizeof(float));
-	}
-
-	for (i = 0; i < dim_x * dim_y; i++)
-	{
-		for (j = 0; j < n_features; j++)
+		for (j = 0; j < dim_y; j++)
 		{
-			weights[i][j] = (float)rand() / (float)RAND_MAX;
+			for (k = 0; k < n_features; k++)
+			{
+				weights[i*dim_x*n_features + j*n_features + k] = (float)rand() / (float)RAND_MAX;
+			}
 		}
 	}
 
@@ -30,49 +28,50 @@ float **initialize_weights(int dim_x, int dim_y, int n_features)
 }
 
 
-void save_weights(char *fname, float **w, int x, int y, int n)
+void save_weights(char *fname, float *w, int x, int y, int n)
 {
-	int i;
+	int i, j;
 	FILE *f = fopen(fname, "wb");
 
-	for (i = 0; i < x * y; i++)
+	for (i = 0; i < x; i++)
 	{
-		fwrite(w[i], sizeof(float), n, f);
-	}
-}
-
-
-void print_weights_debug(float **w, int x, int y, int n)
-{
-	int i, j;
-
-	for (i = 0; i < x * y; i++)
-	{
-		for (j = 0; j < n; j++)
+		for (j = 0; j < y; j++)
 		{
-			printf("%5.3f\t", w[i][j]);
+			fwrite(&(w[i*x*n + j*n]), sizeof(float), n, f);
 		}
-		printf("\n");
 	}
 }
 
 
-float **load_rand_colors(int size)
+void print_weights_debug(float *w, int x, int y, int n)
 {
-	float **X = (float **) malloc (COLOR_D * size * sizeof(float *));
-	int i, j;
+	int i, j, k;
 
-	for (i = 0; i < size; i++)
+	for (i = 0; i < x; i++)
 	{
-		X[i] = (float *) malloc (COLOR_D * sizeof(float));
+		for (j = 0; j < y; j++)
+		{
+			for (k = 0; k < n; k++)
+			{
+				printf("%5.3f\t", w[i*x*n + j*n + k]);
+			}
+			printf("\n");
+		}
 	}
+}
+
+
+float *load_rand_colors(int size)
+{
+	float *X = (float *) malloc (COLOR_D * size * sizeof(float));
+	int i, j;
 
 	for (i = 0; i < size; i++)
 	{
 		for (j = 0; j < COLOR_D; j++)
 		{
-			X[i][j] = (float)(rand() % 256);
-			X[i][j] /= MAX_RGB;
+			X[i * COLOR_D + j] = (float)(rand() % 256);
+			X[i * COLOR_D + j] /= MAX_RGB;
 		}
 	}
 
@@ -80,31 +79,33 @@ float **load_rand_colors(int size)
 }
 
 
-struct coords find_bmu(float **weights, float *x, int dim_x, int dim_y, int n_features)
+struct coords find_bmu(float *weights, float *x, int dim_x, int dim_y, int n_features)
 {
-	int i, j, min_idx = -1;
+	int i, j, k;
 	float min = FLT_MAX, dist;
 	struct coords out;
 
-	for (i = 0; i < dim_x * dim_y; i++)
+	for (i = 0; i < dim_x; i++)
 	{
-		dist = 0.0;
-		for (j = 0; j < n_features; j++)
+		for (j = 0; j < dim_y; j++)
 		{
-			dist += pow(weights[i][j] - x[j], 2);
-		}
+			dist = 0.0;
+			for (k = 0; k < n_features; k++)
+			{
+				dist += pow(weights[i*dim_x*n_features + j*n_features + k] - x[k], 2);
+			}
 
-		dist = sqrt(dist);
+			dist = sqrt(dist);
 
-		if (dist < min)
-		{
-			min = dist;
-			min_idx = i;
+			if (dist < min)
+			{
+				min = dist;
+				out.x = i;
+				out.y = j;
+			}
 		}
+		
 	}
-
-	out.x = min_idx / dim_x;
-	out.y = min_idx % dim_y;
 
 	return out;
 }

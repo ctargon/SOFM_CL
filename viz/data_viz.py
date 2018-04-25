@@ -13,12 +13,12 @@ import sys
 
 if __name__ == '__main__':
 
-	network_dimensions = [160,160]
+	network_dimensions = [20,20]
 	n_f = 3
 
 	iters = 5000
 
-	a = np.fromfile('./weights/init_sofm_weights.dat', dtype=np.float32)
+	a = np.fromfile('./weights/init_opencl_sofm_weights.dat', dtype=np.float32)
 
 	a = a.reshape((network_dimensions[0] * network_dimensions[1], n_f))
 
@@ -40,7 +40,7 @@ if __name__ == '__main__':
 						edgecolor='none'))
 
 
-	b = np.fromfile('./weights/final_sofm_weights.dat', dtype=np.float32)
+	b = np.fromfile('./weights/final_opencl_sofm_weights.dat', dtype=np.float32)
 	b = b.reshape((network_dimensions[0] * network_dimensions[1], n_f))
 
 	print b.shape

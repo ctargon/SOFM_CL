@@ -26,12 +26,10 @@ cl_command_queue queue;
 cl_program program = NULL;
 cl_kernel kernel; 
 
-cl_mem output_buf; 
-cl_mem input_a_buf;
-cl_mem input_b_buf;
-
 cl_mem weights_buf;
 cl_mem dataset_buf;
+cl_mem distances_buf;
+cl_mem bmu_idx_buf;
 
 // // Problem data
 int N; // problem size
@@ -56,8 +54,8 @@ float radius;
 float time_delay;
 
 // global data pointers and params
-float **color_data;
-float **weights;
+float *color_data;
+float *weights;
 int num_data_examples;
 
 
@@ -78,7 +76,10 @@ void cleanup();
 
 // Entry point.
 int main(int argc, char **argv) {
+	time_t t;
 	test = false;
+
+	srand((unsigned) time(&t));
 
 	if (argc != 4)
 	{
@@ -92,10 +93,9 @@ int main(int argc, char **argv) {
 	// read kernel file
 	read_kernel_file(argv[1]);
 
+
 	// Initialize the problem data.
 	init_problem();
-
-	return 0;
 
 	// Initialize OpenCL.
 	if(!init_opencl()) 
@@ -103,6 +103,9 @@ int main(int argc, char **argv) {
 		printf("Initializing OpenCL failed.\n");
 		return -1;
 	}
+
+	//printf("yeet dawg\n");
+
 
 	// Run the kernel.
 	run();
@@ -207,6 +210,23 @@ bool init_opencl() {
 
 	// Build the program that was just created.
 	status = clBuildProgram(program, 0, NULL, "", NULL, NULL);
+
+	if (status == CL_BUILD_PROGRAM_FAILURE) 
+	{
+	    // Determine the size of the log
+	    size_t log_size;
+	    clGetProgramBuildInfo(program, device[0], CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+
+	    // Allocate memory for the log
+	    char *log = (char *) malloc(log_size);
+
+	    // Get the log
+	    clGetProgramBuildInfo(program, device[0], CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+
+	    // Print the log
+	    printf("%s\n", log);
+	}
+
 	checkError(status, "Failed to build program");
 
 	// Command queue.
@@ -214,7 +234,7 @@ bool init_opencl() {
 	checkError(status, "Failed to create command queue");
 
 	// Kernel.
-	const char *kernel_name = "vecAdd";
+	const char *kernel_name = "find_bmu";
 	kernel = clCreateKernel(program, kernel_name, &status);
 	checkError(status, "Failed to create kernel");
 
@@ -242,6 +262,12 @@ bool init_opencl() {
 			NULL, &status);
 	checkError(status, "Failed to create buffer for dataset");
 
+	distances_buf = clCreateBuffer(context, CL_MEM_READ_WRITE,
+			sizeof(float) * dim_x * dim_y, NULL, &status);
+
+	bmu_idx_buf = clCreateBuffer(context, CL_MEM_READ_WRITE,
+			sizeof(int), NULL, &status);
+
 	return true;
 }
 
@@ -249,13 +275,16 @@ bool init_opencl() {
 
 void run() 
 {
-	int i, num_errors;
+	int i, j, rand_int, bmu_idx;
+	float *distances = (float *) malloc (sizeof(float) * dim_x * dim_y);
 	cl_int status;
 
 	// Launch the problem for each device.
 	cl_event kernel_event;
 	cl_event finish_event;
 	cl_event write_event;
+
+	save_weights((char *)"./weights/init_opencl_sofm_weights.dat", weights, dim_x, dim_y, n_features);
 
 	status = clEnqueueWriteBuffer(queue, weights_buf, CL_FALSE,
 				0, sizeof(float) * dim_x * dim_y * n_features, 
@@ -264,23 +293,13 @@ void run()
 
 	status = clEnqueueWriteBuffer(queue, dataset_buf, CL_FALSE,
 				0, sizeof(float) * num_data_examples * n_features, 
-				dataset, 0, NULL, &write_event);
+				color_data, 0, NULL, &write_event);
 	checkError(status, "Failed to write input buffer");
-
-
-	// Set kernel arguments.
-	unsigned argi = 0;
-	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &input_a_buf);
-	checkError(status, "Failed to set argument %d", argi - 1);
-	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &input_b_buf);
-	checkError(status, "Failed to set argument %d", argi - 1);
-	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &output_buf);
-	checkError(status, "Failed to set argument %d", argi - 1);
-
-	int vv = N;
-
-	status = clSetKernelArg(kernel, argi++, sizeof(int), &vv);
-	checkError(status, "Failed to set argument %d", argi - 1);
+	
+	status = clEnqueueWriteBuffer(queue, distances_buf, CL_FALSE,
+				0, sizeof(float) * dim_x * dim_y, 
+				distances, 0, NULL, &write_event);
+	checkError(status, "Failed to write input buffer"); 
   
 
 	// Enqueue kernel.
@@ -295,30 +314,91 @@ void run()
 	// the writes to the input buffers have completed.
 	const size_t localSize = 256;
 	//const size_t global_work_size = N;
-	const size_t global_work_size = ceil(N/(float)localSize)*localSize;
+	const size_t global_work_size = ceil((dim_x * dim_y)/(float)localSize)*localSize;
 	//printf("Launching for device %d (%d elements)\n", 0, global_work_size);
 
+	rand_int = rand() % num_data_examples;
+
+	// Set kernel arguments for the find_bmu kernel
+	unsigned argi = 0;
+	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &dataset_buf);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &weights_buf);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &distances_buf);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(kernel, argi++, sizeof(int), &dim_x);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(kernel, argi++, sizeof(int), &dim_y);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(kernel, argi++, sizeof(int), &rand_int);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(kernel, argi++, sizeof(int), &n_features);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &bmu_idx_buf);
+	checkError(status, "Failed to set argument %d", argi - 1);
 
 	double start_time = getCurrentTimestamp();
 
-	status = clEnqueueNDRangeKernel(queue, kernel, 1, NULL,
-		  &global_work_size, &localSize, 1, &write_event, &kernel_event);
-	checkError(status, "Failed to launch kernel");
+	for (i = 0; i < iters; i++)
+	{
+		if (i % 100 == 0)
+			printf("iter %d\n", i);
 
-	clFinish(queue);
+		rand_int = rand() % num_data_examples;
 
-	//clWaitForEvents(num_devices, &kernel_event);
+		// set new kernel argument for random number (decides input vector)
+		status = clSetKernelArg(kernel, 5, sizeof(int), &rand_int);
+		checkError(status, "Failed to set argument %d", 5);
+
+
+		// launch kernel with set arguments
+		status = clEnqueueNDRangeKernel(queue, kernel, 1, NULL,
+			  &global_work_size, &localSize, 1, &write_event, &kernel_event);
+		checkError(status, "Failed to launch kernel");
+
+
+		clWaitForEvents(num_devices, &kernel_event);
+
+		// Read the result. This the final operation.
+		status = clEnqueueReadBuffer(queue, distances_buf, CL_FALSE,
+			  0, sizeof(float) * dim_x * dim_y, distances, 1, &kernel_event, &finish_event);
+		// status = clEnqueueReadBuffer(queue, bmu_idx_buf, CL_FALSE,
+		// 	  0, sizeof(int), &bmu_idx, 1, &kernel_event, &finish_event);
+
+		// Wait for all devices to finish.
+		clWaitForEvents(num_devices, &finish_event);	
+		//clFinish(queue);
+
+		float min = 999999999.9;
+		bmu_idx = -1;
+		for (j = 0; j < dim_x * dim_y; j++)
+		{
+			if (distances[j] < min)
+			{
+				min = distances[j];
+				bmu_idx = j;
+			}
+		}
+
+
+
+
+		//printf("idx is %d\n", *bmu_idx);	
+	}
+
+
+
+	clWaitForEvents(num_devices, &finish_event);
+	status = clEnqueueReadBuffer(queue, weights_buf, CL_FALSE,
+			  0, sizeof(float) * dim_x * dim_y * n_features, weights, 1, &kernel_event, &finish_event);
+
+
+	save_weights((char *)"./weights/final_opencl_sofm_weights.dat", weights, dim_x, dim_y, n_features);
+
+
 
 	double end_time = getCurrentTimestamp();
-
-	// Read the result. This the final operation.
-	status = clEnqueueReadBuffer(queue, output_buf, CL_TRUE,
-		  0, sizeof(unsigned short)*N, output, 1, &kernel_event, &finish_event);
-
-
-	// Wait for all devices to finish.
-	clWaitForEvents(num_devices, &finish_event);
-
 
 	// Wall-clock time taken.
 	printf("\nTime: %0.3f ms\n", (end_time - start_time) * 1e3);
@@ -327,38 +407,18 @@ void run()
 	cl_ulong time_ns = getStartEndTime(kernel_event);
 	printf("Kernel time (device 0): %0.3f ms\n", double(time_ns) * 1e-6);
 
-	num_errors = 0;
-  
+ 
 	// Measure host execution time.
-	start_time = getCurrentTimestamp();
+	// start_time = getCurrentTimestamp();
 
-	for(i = 0; i < N; i++)
-	{
-		c_output[i] = inputs_a[i] + inputs_b[i];
-	}
+	// for(i = 0; i < N; i++)
+	// {
+	// 	c_output[i] = inputs_a[i] + inputs_b[i];
+	// }
 
-	end_time = getCurrentTimestamp();
+	// end_time = getCurrentTimestamp();
 
-	int correct = 1;  
-	// Verify host and device match
-	for(i = 0; i < N; i++)
-	{
-		if(c_output[i] != output[i])
-		{
-			num_errors++;
-			correct = 0;
 
-			if(num_errors < 6)
-			{
-				printf("Output %d, %u + %u, is incorrect.\nExpected: %u\nResult: %u\n\n",
-						i, inputs_a[i], inputs_b[i], c_output[i], output[i]);
-			}
-		}
-	}
-
-	// Print if output is valid and host execution time.
-	if(correct == 1)
-		printf("\nOutput Valid\n\n");
 
 	printf("\nC time: %0.3f ms\n", (end_time - start_time) * 1e3);
 
@@ -382,8 +442,8 @@ void cleanup()
 		  clReleaseCommandQueue(queue);
 	}
 
-	if(output_buf) {
-		  clReleaseMemObject(output_buf);
+	if(weights_buf) {
+		  clReleaseMemObject(weights_buf);
 	}
 
 	if(program) {
