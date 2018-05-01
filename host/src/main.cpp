@@ -24,20 +24,13 @@ cl_device_id *device;
 cl_context context = NULL;
 cl_command_queue queue; 
 cl_program program = NULL;
-cl_kernel kernel; 
+cl_kernel bmu_kernel;
+cl_kernel update_kernel; 
 
 cl_mem weights_buf;
 cl_mem dataset_buf;
 cl_mem distances_buf;
-cl_mem bmu_idx_buf;
 
-// // Problem data
-int N; // problem size
-unsigned short *output;
-bool test;
-unsigned short *inputs_a;
-unsigned short *inputs_b;
-unsigned short *c_output;
 
 // global problem parameters
 int dim_x;
@@ -54,9 +47,11 @@ float radius;
 float time_delay;
 
 // global data pointers and params
-float *color_data;
+float *data;
 float *weights;
 int num_data_examples;
+
+char *type_data = NULL;
 
 
 // openCL kernel
@@ -77,18 +72,19 @@ void cleanup();
 // Entry point.
 int main(int argc, char **argv) {
 	time_t t;
-	test = false;
 
 	srand((unsigned) time(&t));
 
-	if (argc != 4)
+	if (argc != 5)
 	{
-		printf("Expecting: ./sofm_cl ./path/to/kernel dim_x dim_y\n");
+		printf("Expecting: ./sofm_cl ./path/to/kernel gtex/color dim_x dim_y\n");
 		return -1;
 	}
 
-	dim_x = atoi(argv[2]);
-	dim_y = atoi(argv[3]);
+	type_data = argv[2];
+
+	dim_x = atoi(argv[3]);
+	dim_y = atoi(argv[4]);
 
 	// read kernel file
 	read_kernel_file(argv[1]);
@@ -139,32 +135,40 @@ void read_kernel_file(char *file)
 void init_problem() {
 
 	//int i;
-	n_features = COLOR_D;
-	iters = 5000;
-	init_lr = lr = 0.1;
+	if (strcmp(type_data, "gtex") == 0)
+	{
+		n_features = 36;
+		iters = 10000;
+		init_lr = lr = 0.1;
 
-	max_dim = max(dim_x, dim_y);
-	init_radius = radius = (float) max_dim / 2.0;
+		max_dim = max(dim_x, dim_y);
+		init_radius = radius = (float) max_dim / 2.0;
 
-	time_delay = (float) iters / log(init_radius);
+		time_delay = (float) iters / log(init_radius);
 
-	num_data_examples = 200;
-	color_data = load_rand_colors(num_data_examples);
+		num_data_examples = 8157;
+		data = load_data_file("./data/myc_targets_v2_train_data.dat", n_features, num_data_examples);
+	}
+
+	if (strcmp(type_data, "color") == 0)
+	{
+		n_features = 3;
+		iters = 10000;
+		init_lr = lr = 0.1;
+
+		max_dim = max(dim_x, dim_y);
+		init_radius = radius = (float) max_dim / 2.0;
+
+		time_delay = (float) iters / log(init_radius);
+
+		num_data_examples = 1000;
+		data = load_rand_colors(num_data_examples, n_features);
+	}
+
+
 
 	weights = initialize_weights(dim_x, dim_y, n_features);
-
-
-	// output = (unsigned short*) malloc(sizeof(unsigned short) * N);
-	// inputs_a = (unsigned short*) malloc(sizeof(unsigned short) * N);  
-	// inputs_b = (unsigned short*) malloc(sizeof(unsigned short) * N);
-	// c_output = (unsigned short*) malloc(sizeof(unsigned short) * N);
-
-	// for(i = 0; i < N; i++)
-	// {
-	// 	inputs_a[i] = rand() % 1000;
-	// 	inputs_b[i] = rand() % 1000;
-	// }
-  
+ 
 }
 
 
@@ -235,8 +239,12 @@ bool init_opencl() {
 
 	// Kernel.
 	const char *kernel_name = "find_bmu";
-	kernel = clCreateKernel(program, kernel_name, &status);
-	checkError(status, "Failed to create kernel");
+	bmu_kernel = clCreateKernel(program, kernel_name, &status);
+	checkError(status, "Failed to create bmu_kernel");
+
+	const char *kernel_name2 = "update_weights";
+	update_kernel = clCreateKernel(program, kernel_name2, &status);
+	checkError(status, "Failed to create bmu_kernel");
 
 	// //Input buffer.
 	// input_a_buf = clCreateBuffer(context, CL_MEM_READ_ONLY, 
@@ -265,9 +273,6 @@ bool init_opencl() {
 	distances_buf = clCreateBuffer(context, CL_MEM_READ_WRITE,
 			sizeof(float) * dim_x * dim_y, NULL, &status);
 
-	bmu_idx_buf = clCreateBuffer(context, CL_MEM_READ_WRITE,
-			sizeof(int), NULL, &status);
-
 	return true;
 }
 
@@ -275,7 +280,7 @@ bool init_opencl() {
 
 void run() 
 {
-	int i, j, rand_int, bmu_idx;
+	int i, j, rand_int, bmu_idx = -1;
 	float *distances = (float *) malloc (sizeof(float) * dim_x * dim_y);
 	cl_int status;
 
@@ -293,14 +298,14 @@ void run()
 
 	status = clEnqueueWriteBuffer(queue, dataset_buf, CL_FALSE,
 				0, sizeof(float) * num_data_examples * n_features, 
-				color_data, 0, NULL, &write_event);
+				data, 0, NULL, &write_event);
 	checkError(status, "Failed to write input buffer");
 	
 	status = clEnqueueWriteBuffer(queue, distances_buf, CL_FALSE,
 				0, sizeof(float) * dim_x * dim_y, 
 				distances, 0, NULL, &write_event);
 	checkError(status, "Failed to write input buffer"); 
-  
+
 
 	// Enqueue kernel.
 	// Use a global work size corresponding to the number of elements to add
@@ -321,42 +326,67 @@ void run()
 
 	// Set kernel arguments for the find_bmu kernel
 	unsigned argi = 0;
-	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &dataset_buf);
+	status = clSetKernelArg(bmu_kernel, argi++, sizeof(cl_mem), &dataset_buf);
 	checkError(status, "Failed to set argument %d", argi - 1);
-	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &weights_buf);
+	status = clSetKernelArg(bmu_kernel, argi++, sizeof(cl_mem), &weights_buf);
 	checkError(status, "Failed to set argument %d", argi - 1);
-	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &distances_buf);
+	status = clSetKernelArg(bmu_kernel, argi++, sizeof(cl_mem), &distances_buf);
 	checkError(status, "Failed to set argument %d", argi - 1);
-	status = clSetKernelArg(kernel, argi++, sizeof(int), &dim_x);
+	status = clSetKernelArg(bmu_kernel, argi++, sizeof(int), &dim_x);
 	checkError(status, "Failed to set argument %d", argi - 1);
-	status = clSetKernelArg(kernel, argi++, sizeof(int), &dim_y);
+	status = clSetKernelArg(bmu_kernel, argi++, sizeof(int), &dim_y);
 	checkError(status, "Failed to set argument %d", argi - 1);
-	status = clSetKernelArg(kernel, argi++, sizeof(int), &rand_int);
+	status = clSetKernelArg(bmu_kernel, argi++, sizeof(int), &rand_int);
 	checkError(status, "Failed to set argument %d", argi - 1);
-	status = clSetKernelArg(kernel, argi++, sizeof(int), &n_features);
+	status = clSetKernelArg(bmu_kernel, argi++, sizeof(int), &n_features);
 	checkError(status, "Failed to set argument %d", argi - 1);
-	status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &bmu_idx_buf);
+
+	// set arguments for the update kernel!
+	argi = 0;
+	status = clSetKernelArg(update_kernel, argi++, sizeof(cl_mem), &dataset_buf);
 	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(update_kernel, argi++, sizeof(cl_mem), &weights_buf);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(update_kernel, argi++, sizeof(cl_mem), &distances_buf);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(update_kernel, argi++, sizeof(int), &bmu_idx);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(update_kernel, argi++, sizeof(int), &dim_x);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(update_kernel, argi++, sizeof(int), &dim_y);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(update_kernel, argi++, sizeof(int), &rand_int);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(update_kernel, argi++, sizeof(int), &n_features);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(update_kernel, argi++, sizeof(float), &radius);
+	checkError(status, "Failed to set argument %d", argi - 1);
+	status = clSetKernelArg(update_kernel, argi++, sizeof(float), &lr);
+	checkError(status, "Failed to set argument %d", argi - 1);
+
 
 	double start_time = getCurrentTimestamp();
 
 	for (i = 0; i < iters; i++)
 	{
-		if (i % 100 == 0)
+		if (i % 1000 == 0)
 			printf("iter %d\n", i);
 
 		rand_int = rand() % num_data_examples;
 
+		// get new radius and new learning rate
+		radius = decay_radius(init_radius, i, time_delay);
+		lr = decay_lr(init_lr, i, iters);
+
 		// set new kernel argument for random number (decides input vector)
-		status = clSetKernelArg(kernel, 5, sizeof(int), &rand_int);
+		status = clSetKernelArg(bmu_kernel, 5, sizeof(int), &rand_int);
 		checkError(status, "Failed to set argument %d", 5);
 
 
 		// launch kernel with set arguments
-		status = clEnqueueNDRangeKernel(queue, kernel, 1, NULL,
+		status = clEnqueueNDRangeKernel(queue, bmu_kernel, 1, NULL,
 			  &global_work_size, &localSize, 1, &write_event, &kernel_event);
 		checkError(status, "Failed to launch kernel");
-
 
 		clWaitForEvents(num_devices, &kernel_event);
 
@@ -381,10 +411,33 @@ void run()
 			}
 		}
 
+		// status = clEnqueueWriteBuffer(queue, bmu_idx_buf, CL_FALSE,
+		// 			0, sizeof(int), 
+		// 			&bmu_idx, 0, NULL, &write_event);
+		// checkError(status, "Failed to write input buffer"); 
+
+		// // Wait for all devices to finish.
+		// clWaitForEvents(num_devices, &write_event);	
+
+		// set new kernel argument for random number (decides input vector)
+		status = clSetKernelArg(update_kernel, 3, sizeof(int), &bmu_idx);
+		checkError(status, "Failed to set argument %d", 3);
+		status = clSetKernelArg(update_kernel, 6, sizeof(int), &rand_int);
+		checkError(status, "Failed to set argument %d", 6);
+		status = clSetKernelArg(update_kernel, 8, sizeof(float), &radius);
+		checkError(status, "Failed to set argument %d", 8);
+		status = clSetKernelArg(update_kernel, 9, sizeof(float), &lr);
+		checkError(status, "Failed to set argument %d", 9);
+
+		// launch kernel with set arguments
+		status = clEnqueueNDRangeKernel(queue, update_kernel, 1, NULL,
+			  &global_work_size, &localSize, 1, &write_event, &kernel_event);
+		checkError(status, "Failed to launch kernel");
+
+		clWaitForEvents(num_devices, &kernel_event);
 
 
-
-		//printf("idx is %d\n", *bmu_idx);	
+		//printf("idx is %d %d\n", bmu_idx / dim_x, bmu_idx % dim_y);	
 	}
 
 
@@ -435,8 +488,11 @@ void run()
 // Free the resources allocated during initialization
 void cleanup() 
 {
-	if(kernel) {
-		clReleaseKernel(kernel);
+	if(bmu_kernel) {
+		clReleaseKernel(bmu_kernel);
+	}
+	if(update_kernel) {
+		clReleaseKernel(update_kernel);
 	}
 	if(queue) {
 		  clReleaseCommandQueue(queue);

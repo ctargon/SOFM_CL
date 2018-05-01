@@ -25,7 +25,8 @@ struct coords
 float *initialize_weights(int dim_x, int dim_y, int n_features);
 void save_weights(char *fname, float *w, int x, int y, int n);
 void print_weights_debug(float *w, int x, int y, int n);
-float *load_rand_colors(int size);
+float *load_data_file(char *file, int n_features, int size);
+float *load_rand_colors(int size, int n_features);
 
 // sofm related functions
 struct coords find_bmu(float *weights, float *x, int dim_x, int dim_y, int n_features);

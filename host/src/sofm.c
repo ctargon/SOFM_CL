@@ -61,17 +61,29 @@ void print_weights_debug(float *w, int x, int y, int n)
 }
 
 
-float *load_rand_colors(int size)
+float *load_data_file(char *file, int n_features, int size)
 {
-	float *X = (float *) malloc (COLOR_D * size * sizeof(float));
+	float *X = (float *) malloc (n_features * size * sizeof(float));
+
+	FILE *fptr = fopen(file, "rb");
+	fread(X, sizeof(float), n_features * size, fptr);
+	fclose(fptr);
+
+	return X;
+}
+
+
+float *load_rand_colors(int size, int n_features)
+{
+	float *X = (float *) malloc (n_features * size * sizeof(float));
 	int i, j;
 
 	for (i = 0; i < size; i++)
 	{
-		for (j = 0; j < COLOR_D; j++)
+		for (j = 0; j < n_features; j++)
 		{
-			X[i * COLOR_D + j] = (float)(rand() % 256);
-			X[i * COLOR_D + j] /= MAX_RGB;
+			X[i * n_features + j] = (float)(rand() % 256);
+			X[i * n_features + j] /= MAX_RGB;
 		}
 	}
 

@@ -17,6 +17,31 @@
 
 #include "../host/src/sofm.h"
 
+
+// High-resolution timer.
+double getCurrentTimestamp() {
+#ifdef _WIN32 // Windows
+  // Use the high-resolution performance counter.
+
+  static LARGE_INTEGER ticks_per_second = {};
+  if(ticks_per_second.QuadPart == 0) {
+    // First call - get the frequency.
+    QueryPerformanceFrequency(&ticks_per_second);
+  }
+
+  LARGE_INTEGER counter;
+  QueryPerformanceCounter(&counter);
+
+  double seconds = double(counter.QuadPart) / double(ticks_per_second.QuadPart);
+  return seconds;
+#else         // Linux
+  timespec a;
+  clock_gettime(CLOCK_MONOTONIC, &a);
+  return (double(a.tv_nsec) * 1.0e-9) + double(a.tv_sec);
+#endif
+}
+
+
 int main (int argc, char **argv)
 {
 	// helper variables
@@ -32,13 +57,9 @@ int main (int argc, char **argv)
 
 	srand((unsigned) time(&t));
 
-	// load data
-	int size = 200;
-	float *color_data = load_rand_colors(size);
-
 	// define network dimensions
-	int net_dim_x = 50;
-	int net_dim_y = 50;
+	int net_dim_x = 40;
+	int net_dim_y = 40;
 
 	// define hyperparameters
 	int iters = 10000;
@@ -47,8 +68,13 @@ int main (int argc, char **argv)
 	int max_dim = max(net_dim_x, net_dim_y);
 	float init_radius = (float) max_dim / 2.0;
 	float radius = init_radius;
-	int num_features = 3;
+	int num_features = 36;
 	float time_delay = (float) iters / log(init_radius);
+
+	// load data
+	int n_samples = 8157;
+	// float *data = load_rand_colors(size, 1000);
+	float *data = load_data_file("./data/myc_targets_v2_train_data.dat", num_features, n_samples);
 
 
 	// initialize network weights
@@ -59,14 +85,16 @@ int main (int argc, char **argv)
 	// begin training process
 	printf("beginning training...\n");
 
+	double start_time = getCurrentTimestamp();
+
 	for (i = 0; i < iters; i++)
 	{
-		if (i % 100 == 0)
+		if (i % 1000 == 0)
 			printf("iter %d\n", i);
 		
 		// get training example
-		idx = rand() % size;
-		x = &(color_data[idx * COLOR_D]);
+		idx = rand() % n_samples;
+		x = &(data[idx * COLOR_D]);
 
 		// find best matching unit
 		bmu_idx = find_bmu(net_weights, x, net_dim_x, net_dim_y, num_features);
@@ -94,11 +122,15 @@ int main (int argc, char **argv)
 		}
 	}
 
+	double end_time = getCurrentTimestamp();
+
+	printf("\nTime: %0.3f ms\n", (end_time - start_time) * 1e3);
+
 	save_weights((char *)"./weights/final_sofm_weights.dat", net_weights, net_dim_x, net_dim_y, num_features);
 
 	free(net_weights);
 
-	free(color_data);
+	free(data);
 
 	return 0;
 }
